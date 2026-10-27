@@ -1,0 +1,230 @@
+#!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
+
+# Copyright (c) 2026 Marco Ribeiro
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy of this software and
+# associated documentation files (the "Software"), to deal in the Software without restriction,
+# including without limitation the rights to use, copy, modify, merge, publish, distribute,
+# sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all copies or
+# substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT
+# NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+# NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM,
+# DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+from __future__ import annotations
+
+import argparse
+import os
+import sys
+from typing import Any, Callable, Generator, Iterable, TypeVar
+
+
+_T = TypeVar("_T")
+
+def _mk_argparser () -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        description="A small utility to handle path lists.",
+        epilog="Place `INPUT` first, or end the options with `-- <INPUT>`.",
+        prog=os.path.basename(__file__),
+    )
+
+    parser.add_argument(
+        "inputs",
+        help="Input path(s) list.",
+        nargs="+",
+    )
+
+    parser.add_argument(
+        "-e", "--exclude",
+        help="Exclude paths from the list.",
+        nargs="*",
+        default=[],
+    )
+
+    parser.add_argument(
+        "-s", "--separator",
+        help="Default separator for the input/output path list.",
+        default=":",
+    )
+
+    parser.add_argument(
+        "--input-separator",
+        help="Separator for the input path list. If missing, use value of --separator.",
+        default=None,
+    )
+
+    parser.add_argument(
+        "--output-separator",
+        help="Separator for the output path list. If missing, use value of --separator.",
+        default=None,
+    )
+
+    parser.add_argument(
+        "-d", "--dedup",
+        help="Deduplicate the list.",
+        action="store_true",
+    )
+
+    parser.add_argument(
+        "--dedup-abs",
+        help="Deduplicate the list by absolute paths. See --resolve-symlinks.",
+        action="store_true",
+    )
+
+    parser.add_argument(
+        "--abs",
+        help="Convert paths to absolute. See --resolve-symlinks.",
+        action="store_true",
+    )
+
+    parser.add_argument(
+        "--rel",
+        help="Convert paths to relative (default: the current directory). See --resolve-symlinks.",
+        nargs="?",
+        default=False,
+        metavar="RELATIVE_TO",
+    )
+
+    parser.add_argument(
+        "--resolve-symlinks",
+        help="Resolve symlinks when converting paths for --abs, --rel, or --dedup-abs.",
+        action="store_true",
+    )
+
+    parser.add_argument(
+        "--no-remove-empty",
+        help="Do not remove empty paths.",
+        action="store_false",
+        dest="remove_empty",
+    )
+
+    parser.add_argument(
+        "--no-trim-paths",
+        help="Do not trim paths.",
+        action="store_false",
+        dest="trim_paths",
+    )
+
+    parser.add_argument(
+        "-o", "--output",
+        help="Output for the path list (default: stdout).",
+        default="-",
+    )
+
+    return parser
+
+def _unique_iter (
+    values: Iterable[_T], key: Callable[[_T], Any] | None = None
+) -> Generator[_T, None, None]:
+    seen: set[Any] = set()
+
+    for v in values:
+        k = v if (key is None) else key(v)
+
+        if k not in seen:
+            seen.add(k)
+            yield v
+
+# since we only handle str paths, we avoid pathlib.Path and use os.path instead, to also persist
+# empty paths when --no-remove-empty is used
+def _unchecked_abspath (p: str, resolve_symlinks: bool) -> str:
+    return os.path.realpath(p) if resolve_symlinks else os.path.abspath(p)
+
+def _abspath (p: str, resolve_symlinks: bool, parent: str | None = None) -> str:
+    if p == "":
+        return ""
+
+    if parent is not None:
+        p = os.path.join(parent, p)
+
+    return _unchecked_abspath(p, resolve_symlinks)
+
+def _relpath (p: str, start: str, resolve_symlinks: bool) -> str:
+    return "" if (p == "") else os.path.relpath(_unchecked_abspath(p, resolve_symlinks), start)
+
+def _normpath (p: str) -> str:
+    return "" if (p == "") else os.path.normpath(p)
+
+if __name__ == "__main__":  # pragma: no branch
+    parser = _mk_argparser()
+
+    # two things here:
+    # - we use a slice over sys.argv to tackle IndexError when no arguments are passed
+    # - older Python have a bug where parse_intermixed_args() does not work when the first
+    #   argument is "--", so we use parse_args() in that case (which is equivalent when "--" is
+    #   the first argument)
+    args = parser.parse_args() if (sys.argv[1 : 2] == ["--"]) else parser.parse_intermixed_args()
+
+    if args.abs and (args.rel is not False):
+        parser.error("Cannot use --abs and --rel at the same time.")
+
+    if args.resolve_symlinks and not (args.abs or (args.rel is not False) or args.dedup_abs):
+        parser.error("--resolve-symlinks requires --abs, --rel, or --dedup-abs.")
+
+    in_sep: str = args.input_separator if (args.input_separator is not None) else args.separator
+
+    if in_sep == "":
+        parser.error("The input separator cannot be empty.")
+
+    out_sep: str = args.output_separator if (args.output_separator is not None) else args.separator
+
+    inputs: Iterable[str] = args.inputs
+    path_it = (p for paths in inputs for p in paths.split(in_sep))
+
+    if args.trim_paths:
+        path_it = (p.strip() for p in path_it)
+
+    if args.remove_empty:
+        path_it = (p for p in path_it if (len(p) > 0))
+
+    exclude_it: Iterable[str] = args.exclude
+    dedup_key: Callable[[str], str] | None = None
+
+    if args.rel is not False:
+        relative_to = (
+            os.getcwd()
+            if (args.rel is None)
+            else _unchecked_abspath(args.rel, args.resolve_symlinks)
+        )
+
+        path_it = (_relpath(p, relative_to, args.resolve_symlinks) for p in path_it)
+        exclude_it = (_relpath(p, relative_to, args.resolve_symlinks) for p in exclude_it)
+
+        if args.dedup_abs:
+            # need to reconstruct the absolute path to deduplicate
+            dedup_key = (lambda p: _abspath(p, args.resolve_symlinks, parent=relative_to))
+
+    else:
+        if args.abs:
+            path_it = (_abspath(p, args.resolve_symlinks) for p in path_it)
+            exclude_it = (_abspath(p, args.resolve_symlinks) for p in exclude_it)
+
+        if args.dedup_abs:
+            dedup_key = (lambda p: _abspath(p, args.resolve_symlinks))
+
+    if args.dedup and (dedup_key is None):
+        dedup_key = _normpath
+
+    exclude_set = frozenset(map(_normpath, exclude_it))
+
+    if len(exclude_set) > 0:
+        path_it = (p for p in path_it if (_normpath(p) not in exclude_set))
+
+    if dedup_key is not None:
+        path_it = _unique_iter(path_it, key=dedup_key)
+
+    out_str = out_sep.join(path_it)
+
+    if args.output == "-":
+        print(out_str, end="")
+
+    else:
+        with open(args.output, "w", encoding="utf-8") as f:
+            f.write(out_str)

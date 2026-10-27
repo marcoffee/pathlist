@@ -1,0 +1,22 @@
+# python bytecode
+__pycache__/
+*.py[cod]
+
+# test and lint caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# local environments
+.python-version
+.venv/
+venv/
+
+# editors
+.vscode/
+.idea/
+*.swp
+*~
