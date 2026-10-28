@@ -85,9 +85,8 @@ def _mk_argparser () -> argparse.ArgumentParser:
         "--double-slashes",
         choices=tuple(_DOUBLE_SLASH_CHOICES.keys()),
         help=(
-            "How to handle double slashes at the beginning of paths. "
-            + "Default: auto (keep on Windows, root on POSIX). "
-            + "; ".join("{!r}: {}".format(k, v) for k, v in _DOUBLE_SLASH_CHOICES.items())
+            "How to handle double slashes at the beginning of paths. Default: auto. Choices: "
+            + "; ".join(f"{k!r}: {v}" for k, v in _DOUBLE_SLASH_CHOICES.items())
         ),
         default="auto",
     )
