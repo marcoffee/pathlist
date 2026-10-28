@@ -21,12 +21,27 @@
 from __future__ import annotations
 
 import argparse
+import functools
 import os
 import sys
-from typing import Any, Callable, Generator, Iterable, TypeVar
+from typing import Any, Callable, Final, Generator, Iterable, TypeVar
 
 
 _T = TypeVar("_T")
+
+_DOUBLE_SLASH_CHOICES: Final = {
+    "auto": "fold when the system treats `//` as the root",
+    "root": "always fold a leading `//` into `/`",
+    "keep": "keep a leading `//` apart from `/`",
+}
+
+def _check_fix_double_slashes () -> bool:
+    try:
+        return os.path.samefile("/", "//")
+
+    except OSError:  # pragma: no cover
+        # systems where either "/" or "//" is not a valid path
+        return False
 
 def _mk_argparser () -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
@@ -64,6 +79,17 @@ def _mk_argparser () -> argparse.ArgumentParser:
         "--output-separator",
         help="Separator for the output path list. If missing, use value of --separator.",
         default=None,
+    )
+
+    parser.add_argument(
+        "--double-slashes",
+        choices=tuple(_DOUBLE_SLASH_CHOICES.keys()),
+        help=(
+            "How to handle double slashes at the beginning of paths. "
+            + "Default: auto (keep on Windows, root on POSIX). "
+            + "; ".join("{!r}: {}".format(k, v) for k, v in _DOUBLE_SLASH_CHOICES.items())
+        ),
+        default="auto",
     )
 
     parser.add_argument(
@@ -134,23 +160,40 @@ def _unique_iter (
 
 # since we only handle str paths, we avoid pathlib.Path and use os.path instead, to also persist
 # empty paths when --no-remove-empty is used
-def _unchecked_abspath (p: str, resolve_symlinks: bool) -> str:
-    return os.path.realpath(p) if resolve_symlinks else os.path.abspath(p)
+def _unchecked_normpath (p: str, fix_double_slashes: bool) -> str:
+    p = os.path.normpath(p)
 
-def _abspath (p: str, resolve_symlinks: bool, parent: str | None = None) -> str:
+    if fix_double_slashes and p.startswith("//"):
+        p = p[1 :]
+
+    return p
+
+def _normpath (p: str, fix_double_slashes: bool) -> str:
+    return "" if (p == "") else _unchecked_normpath(p, fix_double_slashes)
+
+def _unchecked_abspath (p: str, resolve_symlinks: bool, fix_double_slashes: bool) -> str:
+    return _unchecked_normpath(
+        (os.path.realpath(p) if resolve_symlinks else os.path.abspath(p)),
+        fix_double_slashes
+    )
+
+def _abspath (
+    p: str, resolve_symlinks: bool, fix_double_slashes: bool,
+    parent: str | None = None
+) -> str:
     if p == "":
         return ""
 
     if parent is not None:
         p = os.path.join(parent, p)
 
-    return _unchecked_abspath(p, resolve_symlinks)
+    return _unchecked_abspath(p, resolve_symlinks, fix_double_slashes)
 
-def _relpath (p: str, start: str, resolve_symlinks: bool) -> str:
-    return "" if (p == "") else os.path.relpath(_unchecked_abspath(p, resolve_symlinks), start)
+def _relpath (p: str, start: str, resolve_symlinks: bool, fix_double_slashes: bool) -> str:
+    if p == "":
+        return ""
 
-def _normpath (p: str) -> str:
-    return "" if (p == "") else os.path.normpath(p)
+    return os.path.relpath(_unchecked_abspath(p, resolve_symlinks, fix_double_slashes), start)
 
 if __name__ == "__main__":  # pragma: no branch
     parser = _mk_argparser()
@@ -162,8 +205,17 @@ if __name__ == "__main__":  # pragma: no branch
     #   the first argument)
     args = parser.parse_args() if (sys.argv[1 : 2] == ["--"]) else parser.parse_intermixed_args()
 
-    if args.abs and (args.rel is not False):
-        parser.error("Cannot use --abs and --rel at the same time.")
+    fix_double_slashes = (
+        (args.double_slashes == "root")
+        or (args.double_slashes == "auto" and _check_fix_double_slashes())
+    )
+
+    if args.rel is not False:
+        if args.abs:
+            parser.error("Cannot use --abs and --rel at the same time.")
+
+        if args.rel == "":
+            parser.error("The --rel option requires a non-empty argument.")
 
     if args.resolve_symlinks and not (args.abs or (args.rel is not False) or args.dedup_abs):
         parser.error("--resolve-symlinks requires --abs, --rel, or --dedup-abs.")
@@ -174,6 +226,18 @@ if __name__ == "__main__":  # pragma: no branch
         parser.error("The input separator cannot be empty.")
 
     out_sep: str = args.output_separator if (args.output_separator is not None) else args.separator
+
+    abspath = functools.partial(
+        _abspath, resolve_symlinks=args.resolve_symlinks,
+        fix_double_slashes=fix_double_slashes
+    )
+
+    relpath = functools.partial(
+        _relpath, resolve_symlinks=args.resolve_symlinks,
+        fix_double_slashes=fix_double_slashes
+    )
+
+    normpath = functools.partial(_normpath, fix_double_slashes=fix_double_slashes)
 
     inputs: Iterable[str] = args.inputs
     path_it = (p for paths in inputs for p in paths.split(in_sep))
@@ -188,34 +252,30 @@ if __name__ == "__main__":  # pragma: no branch
     dedup_key: Callable[[str], str] | None = None
 
     if args.rel is not False:
-        relative_to = (
-            os.getcwd()
-            if (args.rel is None)
-            else _unchecked_abspath(args.rel, args.resolve_symlinks)
-        )
+        relative_to = os.getcwd() if (args.rel is None) else abspath(args.rel)
 
-        path_it = (_relpath(p, relative_to, args.resolve_symlinks) for p in path_it)
-        exclude_it = (_relpath(p, relative_to, args.resolve_symlinks) for p in exclude_it)
+        path_it = (relpath(p, relative_to) for p in path_it)
+        exclude_it = (relpath(p, relative_to) for p in exclude_it)
 
         if args.dedup_abs:
             # need to reconstruct the absolute path to deduplicate
-            dedup_key = (lambda p: _abspath(p, args.resolve_symlinks, parent=relative_to))
+            dedup_key = (lambda p: abspath(p, parent=relative_to))
 
     else:
         if args.abs:
-            path_it = (_abspath(p, args.resolve_symlinks) for p in path_it)
-            exclude_it = (_abspath(p, args.resolve_symlinks) for p in exclude_it)
+            path_it = map(abspath, path_it)
+            exclude_it = map(abspath, exclude_it)
 
         if args.dedup_abs:
-            dedup_key = (lambda p: _abspath(p, args.resolve_symlinks))
+            dedup_key = abspath
 
     if args.dedup and (dedup_key is None):
-        dedup_key = _normpath
+        dedup_key = normpath
 
-    exclude_set = frozenset(map(_normpath, exclude_it))
+    exclude_set = frozenset(map(normpath, exclude_it))
 
     if len(exclude_set) > 0:
-        path_it = (p for p in path_it if (_normpath(p) not in exclude_set))
+        path_it = (p for p in path_it if (normpath(p) not in exclude_set))
 
     if dedup_key is not None:
         path_it = _unique_iter(path_it, key=dedup_key)

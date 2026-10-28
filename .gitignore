@@ -4,6 +4,7 @@ __pycache__/
 
 # test and lint caches
 .pytest_cache/
+.hypothesis/
 .mypy_cache/
 .ruff_cache/
 .coverage

@@ -13,8 +13,35 @@ from typing import Final, NamedTuple, Sequence, Tuple
 from unittest import mock
 
 
+if os.name != "posix":
+    raise unittest.SkipTest("the tests assume posix paths")
+
 _SCRIPT: Final = Path(__file__).resolve().parent.parent / "pathlist"
 _ARGPARSE_ERROR: Final = 2
+
+def _double_slash_is_root () -> bool:
+    """
+    Asks the system whether a leading `//` names the root, independently of the script, since this
+    is the fact `--double-slashes auto` is specified against.
+
+    :return: Whether `//` and `/` are the same directory, `False` when it cannot be told.
+    """
+    try:
+        return os.path.samefile("/", "//")
+
+    except OSError:
+        return False
+
+_DOUBLE_SLASH_IS_ROOT: Final = _double_slash_is_root()
+
+# (id, arguments, output when `//` is the root, output when it is not)
+_DOUBLE_SLASH_CASES: Final[tuple[tuple[str, tuple[str, ...], str, str], ...]] = (
+    ("exclude-input", ("//a:/b", "-e", "/a"), "/b", "//a:/b"),
+    ("exclude-value", ("/a:/b", "-e", "//a"), "/b", "/a:/b"),
+    ("dedup", ("//a:/a", "-d"), "//a", "//a:/a"),
+    ("dedup-abs", ("//a:/a", "--dedup-abs"), "//a", "//a:/a"),
+    ("abs", ("//usr/lib", "--abs"), "/usr/lib", "//usr/lib"),
+)
 
 # (id, arguments, expected output)
 _Case = Tuple[str, Tuple[str, ...], str]
@@ -383,6 +410,19 @@ class TestAbsolute (_PathlistTestCase):
             f"{self.tmp_path}/lib:/usr/lib",
         )
 
+    def test_abs_resolves_parent_of_symlink (self) -> None:
+        """
+        --abs --resolve-symlinks resolves a symlink before the `..` after it, as the kernel does,
+        instead of cancelling both lexically.
+        """
+        (self.tmp_path / "real" / "sub").mkdir(parents=True)
+        (self.tmp_path / "link").symlink_to(self.tmp_path / "real" / "sub")
+
+        self.assertEqual(
+            self.output("link/..", "--abs", "--resolve-symlinks", cwd=self.tmp_path),
+            f"{self.tmp_path}/real",
+        )
+
     def test_abs_keeps_symlinks (self) -> None:
         """
         --abs keeps symlinks unless --resolve-symlinks is given.
@@ -540,6 +580,15 @@ class TestRelative (_PathlistTestCase):
         """
         self.assertEqual(self.output("/usr/lib:/usr/bin", "--rel", "/usr", "-e", "/usr/lib"), "bin")
 
+    def test_rel_empty_start (self) -> None:
+        """
+        An empty --rel start directory is refused.
+        """
+        result = self.run_script("/a", "--rel", "")
+
+        self.assertEqual(result.returncode, _ARGPARSE_ERROR)
+        self.assertIn("--rel option requires a non-empty argument", result.stderr)
+
     def test_abs_and_rel (self) -> None:
         """
         --abs and --rel cannot be combined.
@@ -564,6 +613,54 @@ class TestOutput (_PathlistTestCase):
 
         self.assertEqual(self.output("/a:/b", "-o", str(target)), "")
         self.assertEqual(target.read_text(encoding="utf-8"), "/a:/b")
+
+class TestDoubleSlash (_PathlistTestCase):
+    def check_double_slash (self, mode_args: tuple[str, ...], is_root: bool) -> None:
+        """
+        Checks every `//` case under the given --double-slashes arguments.
+
+        :param mode_args: The --double-slashes arguments, empty for the default.
+        :param is_root: Whether the outputs should treat a leading `//` as the root.
+        """
+        for case_id, args, root_output, other_output in _DOUBLE_SLASH_CASES:
+            with self.subTest(case=case_id):
+                self.assertEqual(
+                    self.output(*args, *mode_args),
+                    root_output if is_root else other_output,
+                )
+
+    def test_root (self) -> None:
+        """
+        --double-slashes root folds a leading `//` into `/`.
+        """
+        self.check_double_slash(("--double-slashes", "root"), is_root=True)
+
+    def test_keep (self) -> None:
+        """
+        --double-slashes keep keeps a leading `//` apart from `/`.
+        """
+        self.check_double_slash(("--double-slashes", "keep"), is_root=False)
+
+    def test_auto (self) -> None:
+        """
+        --double-slashes auto folds a leading `//` exactly when the system treats it as the root.
+        """
+        self.check_double_slash(("--double-slashes", "auto"), is_root=_DOUBLE_SLASH_IS_ROOT)
+
+    def test_default_is_auto (self) -> None:
+        """
+        Without --double-slashes, a leading `//` is handled as with auto.
+        """
+        self.check_double_slash((), is_root=_DOUBLE_SLASH_IS_ROOT)
+
+    def test_invalid_mode (self) -> None:
+        """
+        An unknown --double-slashes value is refused.
+        """
+        self.assertEqual(
+            self.run_script("/a", "--double-slashes", "fold").returncode,
+            _ARGPARSE_ERROR,
+        )
 
 if __name__ == "__main__":
     unittest.main()

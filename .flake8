@@ -1,5 +1,5 @@
 [flake8]
-extend-ignore = ANN101, E211, E302, E305, PEA001
+extend-ignore = ANN101, E203, E211, E302, E305, PEA001
 
 per-file-ignores =
   tests/*.py: S404, S603
