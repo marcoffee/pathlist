@@ -98,8 +98,8 @@ pathlist "/a:/b:/c" --output-separator "
 ```
 
 Entries are compared after normalization, so `/a/` and `/a` match for `-e` and `-d`; `--dedup-abs`
-compares them by their resolved absolute path. Empty entries are dropped unless
-`--no-remove-empty` is given, and output keeps each entry as written.
+compares them by their absolute path, following symlinks only with `--resolve-symlinks`. Empty
+entries are dropped unless `--no-remove-empty` is given, and output keeps each entry as written.
 
 A leading `//` is folded into `/` when the system treats both as the root, as Linux and macOS do;
 `--double-slashes root` or `keep` overrides that detection.
@@ -115,6 +115,9 @@ python3 -m unittest discover -s tests
 ```
 
 If you have pytest, you can run the same suite with `pytest tests`.
+
+The property-based tests need [Hypothesis](https://hypothesis.readthedocs.io/) and are skipped
+without it; install it, together with coverage, with `pip install -r tests/requirements.txt`.
 
 ## License
 
