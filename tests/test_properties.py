@@ -31,7 +31,7 @@ _TOKENS: Final = (
 )
 
 _entry = st.text(alphabet=_ALPHABET, max_size=128)
-_option_value = _entry.filter(lambda text: not text.startswith("-"))
+_option_value = _entry.filter(lambda text: (not text.startswith("-")))
 _entries = st.lists(_entry, max_size=128)
 _excludes = st.lists(_option_value, min_size=1, max_size=16)
 _double_slash_choice = st.sampled_from(_DOUBLE_SLASH_CHOICES)

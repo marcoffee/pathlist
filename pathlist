@@ -217,7 +217,7 @@ if __name__ == "__main__":  # pragma: no branch
 
     fix_double_slashes = (
         (args.double_slashes == "root")
-        or (args.double_slashes == "auto" and _check_fix_double_slashes())
+        or ((args.double_slashes == "auto") and _check_fix_double_slashes())
     )
 
     if args.rel is not False:
