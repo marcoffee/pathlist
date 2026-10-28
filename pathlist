@@ -172,10 +172,13 @@ def _normpath (p: str, fix_double_slashes: bool) -> str:
     return "" if (p == "") else _unchecked_normpath(p, fix_double_slashes)
 
 def _unchecked_abspath (p: str, resolve_symlinks: bool, fix_double_slashes: bool) -> str:
-    return _unchecked_normpath(
-        (os.path.realpath(p) if resolve_symlinks else os.path.abspath(p)),
-        fix_double_slashes
-    )
+    abs_p = os.path.abspath(p)
+
+    # python's realpath always resolves `//<path>` to `/<path>`, so `//<path>` stays unresolved
+    if resolve_symlinks and (fix_double_slashes or (not abs_p.startswith("//"))):
+        abs_p = os.path.realpath(p)
+
+    return _unchecked_normpath(abs_p, fix_double_slashes)
 
 def _abspath (
     p: str, resolve_symlinks: bool, fix_double_slashes: bool,
@@ -193,7 +196,14 @@ def _relpath (p: str, start: str, resolve_symlinks: bool, fix_double_slashes: bo
     if p == "":
         return ""
 
-    return os.path.relpath(_unchecked_abspath(p, resolve_symlinks, fix_double_slashes), start)
+    abs_p = _unchecked_abspath(p, resolve_symlinks, fix_double_slashes)
+
+    if abs_p.startswith("//") != start.startswith("//"):
+        # "//" paths cannot be made relative unless the start path is also a "//" path and
+        # vice-versa for "/" paths
+        return abs_p
+
+    return os.path.relpath(abs_p, start)
 
 if __name__ == "__main__":  # pragma: no branch
     parser = _mk_argparser()

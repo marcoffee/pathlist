@@ -161,23 +161,28 @@ class TestProperties (_PathlistTestCase):
         )
 
     @_property_settings
-    @given(entries=_entries, start=_option_value)
-    def test_rel (self, entries: List[str], start: str) -> None:
+    @given(entries=_entries, start=_option_value, mode=_double_slash_choice)
+    def test_rel (self, entries: List[str], start: str, mode: str) -> None:
         """
-        --rel entries joined onto the start directory point at the same place as their inputs.
+        --rel entries point at the same place as their inputs, relative ones once joined onto the
+        start directory, and the ones it cannot reach left absolute.
         """
         start_path = os.path.join(self.tmp_path, start)
-        output = self.output("--rel", start_path, "--", ":".join(entries), cwd=self.tmp_path)
+
+        output = self.output(
+            "--rel", start_path, "--double-slashes", mode, "--", ":".join(entries),
+            cwd=self.tmp_path,
+        )
+
         expected = [os.path.join(self.tmp_path, entry) for entry in _kept(entries)]
 
-        # a relative path cannot name a `//` root, so --rel always folds it, whatever the mode
         self.assertEqual(
             [
-                _location(os.path.join(start_path, entry), folds=True)
+                _location(os.path.join(start_path, entry), _folds(mode))
                 for entry in output.split(":")
                 if (entry != "")
             ],
-            [_location(entry, folds=True) for entry in expected],
+            [_location(entry, _folds(mode)) for entry in expected],
         )
 
     @_property_settings

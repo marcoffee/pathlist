@@ -41,6 +41,17 @@ _DOUBLE_SLASH_CASES: Final[tuple[tuple[str, tuple[str, ...], str, str], ...]] = 
     ("dedup", ("//a:/a", "-d"), "//a", "//a:/a"),
     ("dedup-abs", ("//a:/a", "--dedup-abs"), "//a", "//a:/a"),
     ("abs", ("//usr/lib", "--abs"), "/usr/lib", "//usr/lib"),
+    ("rel", ("//a:/usr/b", "--rel", "/usr"), "../a:b", "//a:b"),
+    ("rel-from-double-slash", ("//a/x:/b", "--rel", "//a"), "x:../b", "x:/b"),
+    ("rel-exclude", ("//a:/usr/b", "--rel", "/usr", "-e", "//a"), "b", "b"),
+    ("rel-dedup-abs", ("//a:/usr/b://a/", "--rel", "/usr", "--dedup-abs"), "../a:b", "//a:b"),
+    ("abs-resolve-symlinks", ("//usr/lib", "--abs", "--resolve-symlinks"), "/usr/lib", "//usr/lib"),
+    (
+        "dedup-abs-resolve-symlinks",
+        ("//usr/lib:/usr/lib", "--dedup-abs", "--resolve-symlinks"),
+        "//usr/lib",
+        "//usr/lib:/usr/lib",
+    ),
 )
 
 # (id, arguments, expected output)

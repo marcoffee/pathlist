@@ -101,6 +101,9 @@ Entries are compared after normalization, so `/a/` and `/a` match for `-e` and `
 compares them by their resolved absolute path. Empty entries are dropped unless
 `--no-remove-empty` is given, and output keeps each entry as written.
 
+A leading `//` is folded into `/` when the system treats both as the root, as Linux and macOS do;
+`--double-slashes root` or `keep` overrides that detection.
+
 Run `pathlist --help` for every option.
 
 ## Tests
