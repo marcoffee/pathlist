@@ -28,6 +28,7 @@ from typing import Any, Callable, Final, Generator, Iterable, TypeVar
 
 
 _T = TypeVar("_T")
+__version__: Final = "0.0.0-dev"
 
 _DOUBLE_SLASH_CHOICES: Final = {
     "auto": "fold when the system treats `//` as the root",
@@ -141,6 +142,20 @@ def _mk_argparser () -> argparse.ArgumentParser:
         "-o", "--output",
         help="Output for the path list (default: stdout).",
         default="-",
+    )
+
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"%(prog)s {__version__}",
+        help="Print the version and exit.",
+    )
+
+    parser.add_argument(
+        "--dump-version",
+        action="version",
+        version=__version__,
+        help="Like --version, but only prints the version number.",
     )
 
     return parser

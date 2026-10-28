@@ -23,6 +23,13 @@ jobs:
         with:
           persist-credentials: false
 
+      # stamps the tag (without the "v" prefix) into the script
+      - run: |
+          sed -i "s/^__version__: Final = \"0\.0\.0-dev\"$/__version__: Final = \"${GITHUB_REF_NAME#v}\"/" pathlist
+
+      # ensure that the stamp worked
+      - run: test "$(python3 pathlist --dump-version)" = "${GITHUB_REF_NAME#v}"
+
       - run: gh release create "${GITHUB_REF_NAME}" pathlist --title "${GITHUB_REF_NAME}" --generate-notes
         env:
           GH_TOKEN: ${{ github.token }}

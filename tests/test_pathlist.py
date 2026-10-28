@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import os
+import re
 import runpy
 import subprocess
 import sys
@@ -33,6 +34,16 @@ def _double_slash_is_root () -> bool:
         return False
 
 _DOUBLE_SLASH_IS_ROOT: Final = _double_slash_is_root()
+
+# matches semver 2.0.0
+_SEMVER: Final = re.compile(
+    # major.minor.patch
+    r"(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)"
+    # an optional `-pre-release`
+    + r"(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?"
+    # an optional `+build`
+    + r"(\+[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?"
+)
 
 # (id, arguments, output when `//` is the root, output when it is not)
 _DOUBLE_SLASH_CASES: Final[tuple[tuple[str, tuple[str, ...], str, str], ...]] = (
@@ -608,6 +619,31 @@ class TestRelative (_PathlistTestCase):
 
         self.assertEqual(result.returncode, _ARGPARSE_ERROR)
         self.assertIn("--abs and --rel", result.stderr)
+
+class TestVersion (_PathlistTestCase):
+    def test_dump_version_is_semver (self) -> None:
+        """
+        --dump-version prints only a semver version and a newline.
+        """
+        version = self.output("--dump-version")
+
+        self.assertTrue(version.endswith("\n"))
+        self.assertIsNotNone(_SEMVER.fullmatch(version[: -1]), version)
+
+    def test_version (self) -> None:
+        """
+        --version prints the program name followed by the same version as --dump-version.
+        """
+        self.assertEqual(self.output("--version"), f"pathlist {self.output('--dump-version')}")
+
+    def test_version_ignores_other_arguments (self) -> None:
+        """
+        --dump-version exits before the inputs or other options are processed.
+        """
+        self.assertEqual(
+            self.output("/a", "--abs", "--dump-version"),
+            self.output("--dump-version"),
+        )
 
 class TestOutput (_PathlistTestCase):
     def test_stdout_without_newline (self) -> None:
