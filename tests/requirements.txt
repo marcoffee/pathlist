@@ -1,2 +1,2 @@
 coverage==7.17.0
-hypothesis==6.170.12
+hypothesis==6.170.13
